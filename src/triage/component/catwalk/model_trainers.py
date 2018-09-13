@@ -245,7 +245,6 @@ class ModelTrainer(object):
         class_path,
         parameters,
         model_hash,
-        model_store,
         misc_db_parameters
     ):
         """Train a model, cache it, and write metadata to a database
@@ -255,7 +254,6 @@ class ModelTrainer(object):
             class_path (string) A full classpath to the model class
             parameters (dict) hyperparameters to give to the model constructor
             model_hash (string) a unique id for the model
-            model_store (catwalk.storage.Store) the place in which to store the model
             misc_db_parameters (dict) params to pass through to the database
 
         Returns: (int) a database id for the model
@@ -278,7 +276,7 @@ class ModelTrainer(object):
         )
         logging.info('Trained model: hash %s, model group id %s ', model_hash, model_group_id)
         #Writing the model to storage, then getting its size in kilobytes.
-        model_store.write(trained_model)
+        self.model_storage_engine.write(trained_model, model_hash)
         model_size = sys.getsizeof(trained_model)/(1024.0)
 
         logging.info('Cached model: %s', model_hash)
@@ -371,15 +369,14 @@ class ModelTrainer(object):
             misc_db_parameters (dict) params to pass through to the database
         Returns: (int) model id
         """
-        model_store = self.model_storage_engine.get_store(model_hash)
         saved_model_id = retrieve_model_id_from_hash(self.db_engine, model_hash)
-        if not self.replace and model_store.exists() and saved_model_id:
+        if not self.replace and self.model_storage_engine.exists(model_hash) and saved_model_id:
             logging.info('Skipping %s/%s', class_path, parameters)
             return saved_model_id
 
         if self.replace:
             reason = 'replace flag has been set'
-        elif not model_store.exists():
+        elif not self.model_storage_engine.exists(model_hash):
             reason = 'model pickle not found in store'
         elif not saved_model_id:
             reason = 'model metadata not found'
@@ -392,7 +389,6 @@ class ModelTrainer(object):
                 class_path,
                 parameters,
                 model_hash,
-                model_store,
                 misc_db_parameters
             )
         except BaselineFeatureNotInMatrix:

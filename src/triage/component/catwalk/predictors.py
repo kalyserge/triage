@@ -75,9 +75,8 @@ class Predictor(object):
 
         model_hash = self._retrieve_model_hash(model_id)
         logging.info('Checking for model_hash %s in store', model_hash)
-        model_store = self.model_storage_engine.get_store(model_hash)
-        if model_store.exists():
-            return model_store.load()
+        if self.model_storage_engine.exists(model_hash):
+            return self.model_storage_engine.load(model_hash)
 
     @db_retry
     def delete_model(self, model_id):
@@ -87,8 +86,7 @@ class Predictor(object):
             model_id (int) The id of a given model in the database
         """
         model_hash = self._retrieve_model_hash(model_id)
-        model_store = self.model_storage_engine.get_store(model_hash)
-        model_store.delete()
+        self.model_storage_engine.delete(model_hash)
 
     @db_retry
     def _existing_predictions(self, Prediction_obj, session, model_id, matrix_store):

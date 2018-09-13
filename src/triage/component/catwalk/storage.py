@@ -16,20 +16,20 @@ import yaml
 
 
 class Store(object):
-    def __init__(self, path):
-        self.path = path
+    def __init__(self, *pathparts):
+        self.pathparts = pathparts
 
     @classmethod
-    def factory(self, path):
-        path_parsed = urlparse(path)
+    def factory(self, *pathparts):
+        path_parsed = urlparse(pathparts[0])
         scheme = path_parsed.scheme
 
         if scheme in ('', 'file'):
-            return FSStore(path)
+            return FSStore(*pathparts)
         elif scheme == 's3':
-            return S3Store(path)
+            return S3Store(*pathparts)
         elif scheme == 'memory':
-            return MemoryStore(path)
+            return MemoryStore(*pathparts)
         else:
             raise ValueError('Unable to infer correct Store from project path')
 
@@ -55,6 +55,8 @@ class Store(object):
 
 
 class S3Store(Store):
+    def __init__(self, *pathparts):
+        self.path = str(pathlib.PurePosixPath(*pathparts))
 
     def exists(self):
         s3 = s3fs.S3FileSystem()
@@ -70,6 +72,9 @@ class S3Store(Store):
 
 
 class FSStore(Store):
+    def __init__(self, *pathparts):
+        self.path = pathlib.Path(*pathparts)
+
     def exists(self):
         return os.path.isfile(self.path)
 
@@ -83,6 +88,9 @@ class FSStore(Store):
 
 class MemoryStore(Store):
     store = None
+
+    def __init__(self, *pathparts):
+        pass
 
     def exists(self):
         return self.store is not None
@@ -101,77 +109,55 @@ class MemoryStore(Store):
                          'Use write/load methods instead.')
 
 
-class ModelStore():
-    def __init__(self, store):
-        self.store = store
+class ProjectStorage(object):
+    def __init__(self, project_path):
+        self.project_path = project_path
+        self.storage_class = Store.factory(self.project_path).__class__
 
-    def write(self, obj):
-        with self.store.open('wb') as fd:
-            joblib.dump(obj, fd, compress=True)
-
-    def load(self):
-        with self.store.open('rb') as fd:
-            return joblib.load(fd)
-
-    def exists(self):
-        return self.store.exists()
-
-    def delete(self):
-        return self.store.delete()
+    def get_store(self, directories, leaf_filename):
+       return self.storage_class(self.project_path, *directories, leaf_filename)
 
 
 class ModelStorageEngine(object):
-    def __init__(self, project_path):
-        self.project_path = project_path
-        self.model_dir = 'trained_models'
+    """Store arbitrary models in a given project storage using joblib"""
+    def __init__(self, project_storage, model_directory='trained_models'):
+        self.project_storage = project_storage
+        self.directories = [model_directory]
 
-    @classmethod
-    def factory(self, path):
-        path_parsed = urlparse(path)
-        scheme = path_parsed.scheme
+    def write(self, obj, model_hash):
+        with self._get_store(model_hash).open('wb') as fd:
+            joblib.dump(obj, fd, compress=True)
 
-        if scheme in ('', 'file'):
-            return FSModelStorageEngine(path)
-        elif scheme == 's3':
-            return S3ModelStorageEngine(path)
-        elif scheme == 'memory':
-            return InMemoryModelStorageEngine(path)
-        else:
-            raise ValueError('Unable to infer correct ModelStorageEngine from path')
+    def load(self, model_hash):
+        with self._get_store(model_hash).open('rb') as fd:
+            return joblib.load(fd)
 
+    def exists(self, model_hash):
+        return self._get_store(model_hash).exists()
 
-    def get_store(self, model_hash):
-        pass
+    def delete(self, model_hash):
+        return self._get_store(model_hash).delete()
 
-
-class S3ModelStorageEngine(ModelStorageEngine):
-    def get_store(self, model_hash):
-        return ModelStore(S3Store(str(pathlib.PurePosixPath(self.project_path, self.model_dir, model_hash))))
+    def _get_store(self, model_hash):
+        return self.project_storage.get_store(self.directories, model_hash)
 
 
-class FSModelStorageEngine(ModelStorageEngine):
-    def get_store(self, model_hash):
-        return ModelStore(FSStore(pathlib.Path(self.project_path, self.model_dir, model_hash)))
+class MatrixStorageEngine(object):
+    def __init__(self, project_storage, matrix_storage_class, matrix_directory='matrices'):
+        self.project_storage = project_storage
+        self.matrix_storage_class = matrix_storage_class
+        self.directories = [matrix_directory]
 
-
-class InMemoryModelStorageEngine(ModelStorageEngine):
-    stores = {}
-
-    def get_store(self, model_hash):
-        if model_hash not in self.stores:
-            self.stores[model_hash] = MemoryStore(model_hash)
-        return self.stores[model_hash]
-
+    def get_store(self, matrix_uuid):
+        return self.matrix_storage_class(self.project_storage, self.directories, matrix_uuid)
 
 class MatrixStore(object):
     _labels = None
 
-    def __init__(self, matrix_path='memory://', metadata_path='memory://', matrix=None, metadata=None):
-        self.matrix_path = matrix_path
-        self.metadata_path = metadata_path
-
-        self.matrix_base_store = Store.factory(self.matrix_path)
-        self.metadata_base_store = Store.factory(self.metadata_path)
+    def __init__(self, project_storage, directories, matrix_uuid, matrix=None, metadata=None):
+        self.matrix_uuid = matrix_uuid
+        self.matrix_base_store = project_storage.get_store(directories, f'{matrix_uuid}{self.suffix}')
+        self.metadata_base_store = project_storage.get_store(directories, f'{matrix_uuid}.yaml')
 
         self.matrix = matrix
         self.metadata = metadata
@@ -230,7 +216,7 @@ class MatrixStore(object):
 
     @property
     def uuid(self):
-        return self.metadata['metta-uuid']
+        return self.matrix_uuid
 
     @property
     def as_of_dates(self):
@@ -295,17 +281,17 @@ class MatrixStore(object):
 
 
 class HDFMatrixStore(MatrixStore):
+    suffix = 'h5'
 
-    def __init__(self, matrix_path=None, metadata_path=None):
-        super().__init__(matrix_path, metadata_path)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         if isinstance(self.matrix_base_store, S3Store):
             raise ValueError('HDFMatrixStore cannot be used with S3')
-        self.metadata = self.load_metadata()
 
     @property
     def head_of_matrix(self):
         try:
-            head_of_matrix = pd.read_hdf(self.matrix_path, start=0, stop=1)
+            head_of_matrix = pd.read_hdf(self.matrix_base_store.path, start=0, stop=1)
             # Is the index already in place?
             if head_of_matrix.index.name not in self.metadata['indices']:
                 head_of_matrix.set_index(self.metadata['indices'], inplace=True)
@@ -332,9 +318,7 @@ class HDFMatrixStore(MatrixStore):
 
 
 class CSVMatrixStore(MatrixStore):
-
-    def __init__(self, matrix_path=None, metadata_path=None):
-        super().__init__(matrix_path, metadata_path)
+    suffix = 'csv'
 
     @property
     def head_of_matrix(self):

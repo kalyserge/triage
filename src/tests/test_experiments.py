@@ -10,8 +10,6 @@ import pytest
 import testing.postgresql
 from triage import create_engine
 
-from triage.component.catwalk.storage import FSModelStorageEngine
-
 from tests.utils import sample_config, populate_source_data
 
 from triage.experiments import (

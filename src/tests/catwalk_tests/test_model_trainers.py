@@ -91,7 +91,7 @@ def test_model_trainer(sample_matrix_store, grid_config):
 
             # 4. that all four models are cached
             model_pickles = [
-                model_storage_engine.get_store(model_hash).load()
+                model_storage_engine.load(model_hash)
                 for model_hash in hashes
             ]
             assert len(model_pickles) == 4
@@ -158,7 +158,7 @@ def test_model_trainer(sample_matrix_store, grid_config):
 
             # 8. if the cache is missing but the metadata is still there, reuse the metadata
             for row in db_engine.execute('select model_hash from model_metadata.models'):
-                model_storage_engine.get_store(row[0]).delete()
+                model_storage_engine.delete(row[0])
             new_model_ids = trainer.train_models(
                 grid_config=grid_config,
                 misc_db_parameters=dict(),

@@ -61,7 +61,7 @@ def fake_trained_model(project_path, model_storage_engine, db_engine, train_matr
         (int) model id for database retrieval
     """
     trained_model = MockTrainedModel()
-    model_storage_engine.get_store('abcd').write(trained_model)
+    model_storage_engine.write(trained_model, 'abcd')
     session = sessionmaker(db_engine)()
     db_model = Model(model_hash='abcd', train_matrix_uuid=train_matrix_uuid)
     session.add(db_model)
