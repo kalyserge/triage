@@ -56,7 +56,7 @@ class Store(object):
 
 class S3Store(Store):
     def __init__(self, *pathparts):
-        self.path = str(pathlib.PurePosixPath(*pathparts))
+        self.path = str(pathlib.PurePosixPath(pathparts[0].replace('s3://', ''), *pathparts[1:]))
 
     def exists(self):
         s3 = s3fs.S3FileSystem()
@@ -74,6 +74,7 @@ class S3Store(Store):
 class FSStore(Store):
     def __init__(self, *pathparts):
         self.path = pathlib.Path(*pathparts)
+        os.makedirs(dirname(self.path), exist_ok=True)
 
     def exists(self):
         return os.path.isfile(self.path)
@@ -82,7 +83,6 @@ class FSStore(Store):
         os.remove(self.path)
 
     def open(self, *args, **kwargs):
-        os.makedirs(dirname(self.path), exist_ok=True)
         return open(self.path, *args, **kwargs)
 
 
@@ -116,6 +116,9 @@ class ProjectStorage(object):
 
     def get_store(self, directories, leaf_filename):
        return self.storage_class(self.project_path, *directories, leaf_filename)
+   
+    def matrix_storage_engine(self, matrix_storage_class=None, matrix_directory=None):
+       return MatrixStorageEngine(self, matrix_storage_class, matrix_directory)
 
 
 class ModelStorageEngine(object):
@@ -143,20 +146,21 @@ class ModelStorageEngine(object):
 
 
 class MatrixStorageEngine(object):
-    def __init__(self, project_storage, matrix_storage_class, matrix_directory='matrices'):
+    def __init__(self, project_storage, matrix_storage_class=None, matrix_directory=None):
         self.project_storage = project_storage
-        self.matrix_storage_class = matrix_storage_class
-        self.directories = [matrix_directory]
+        self.matrix_storage_class = matrix_storage_class or CSVMatrixStore
+        self.directories = [matrix_directory or 'matrices']
 
     def get_store(self, matrix_uuid):
         return self.matrix_storage_class(self.project_storage, self.directories, matrix_uuid)
+
 
 class MatrixStore(object):
     _labels = None
 
     def __init__(self, project_storage, directories, matrix_uuid, matrix=None, metadata=None):
         self.matrix_uuid = matrix_uuid
-        self.matrix_base_store = project_storage.get_store(directories, f'{matrix_uuid}{self.suffix}')
+        self.matrix_base_store = project_storage.get_store(directories, f'{matrix_uuid}.{self.suffix}')
         self.metadata_base_store = project_storage.get_store(directories, f'{matrix_uuid}.yaml')
 
         self.matrix = matrix
@@ -185,6 +189,10 @@ class MatrixStore(object):
     @property
     def head_of_matrix(self):
         return self.matrix.head(1)
+
+    @property
+    def exists(self):
+        return self.matrix_base_store.exists() and self.metadata_base_store.exists()
 
     @property
     def empty(self):
@@ -293,7 +301,7 @@ class HDFMatrixStore(MatrixStore):
         try:
             head_of_matrix = pd.read_hdf(self.matrix_base_store.path, start=0, stop=1)
             # Is the index already in place?
-            if head_of_matrix.index.name not in self.metadata['indices']:
+            if head_of_matrix.index.names != self.metadata['indices']:
                 head_of_matrix.set_index(self.metadata['indices'], inplace=True)
         except pd.errors.EmptyDataError:
             head_of_matrix = None
@@ -301,17 +309,22 @@ class HDFMatrixStore(MatrixStore):
         return head_of_matrix
 
     def _load(self):
-        matrix = pd.read_hdf(self.matrix_path)
+        matrix = pd.read_hdf(self.matrix_base_store.path)
 
         # Is the index already in place?
-        if matrix.index.name not in self.metadata['indices']:
+        if matrix.index.names != self.metadata['indices']:
             matrix.set_index(self.metadata['indices'], inplace=True)
 
         return matrix
 
     def save(self):
-        with self.matrix_base_store.open('wb') as fd:
-            self.matrix.to_hdf(fd, format='table', mode='wb')
+        hdf = pd.HDFStore(self.matrix_base_store.path,
+                          mode='w',
+                          complevel=4,
+                          complib="zlib",
+                          format='table')
+        hdf.put(self.matrix_uuid, self.matrix.apply(pd.to_numeric), data_columns=True)
+        hdf.close()
 
         with self.metadata_base_store.open('wb') as fd:
             yaml.dump(self.metadata, fd, encoding='utf-8')

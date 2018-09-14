@@ -11,6 +11,7 @@ import testing.postgresql
 from triage import create_engine
 
 from tests.utils import sample_config, populate_source_data
+from triage.component.catwalk.storage import HDFMatrixStore, CSVMatrixStore
 
 from triage.experiments import (
     MultiCoreExperiment,
@@ -40,9 +41,15 @@ parametrize_experiment_classes = pytest.mark.parametrize(('experiment_class',), 
     (partial(RQExperiment, redis_connection=fakeredis.FakeStrictRedis(), queue_kwargs={'async': False}),),
 ])
 
+parametrize_matrix_storage_classes = pytest.mark.parametrize(('matrix_storage_class',), [
+    (HDFMatrixStore,),
+    (CSVMatrixStore,),
+])
+
 
 @parametrize_experiment_classes
-def test_simple_experiment(experiment_class):
+@parametrize_matrix_storage_classes
+def test_simple_experiment(experiment_class, matrix_storage_class):
     with testing.postgresql.Postgresql() as postgresql:
         db_engine = create_engine(postgresql.url())
         populate_source_data(db_engine)
@@ -51,6 +58,7 @@ def test_simple_experiment(experiment_class):
                 config=sample_config(),
                 db_engine=db_engine,
                 project_path=os.path.join(temp_dir, 'inspections'),
+                matrix_storage_class=matrix_storage_class,
                 cleanup=True,
             ).run()
 

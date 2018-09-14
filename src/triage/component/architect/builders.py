@@ -249,7 +249,7 @@ class MatrixBuilder(BuilderBase):
             return
 
         matrix_store = self.matrix_storage_engine.get_store(matrix_uuid)
-        if not self.replace and matrix_store.exists():
+        if not self.replace and matrix_store.exists:
             logging.info('Skipping %s because matrix already exists', matrix_uuid)
             return
 
@@ -274,7 +274,7 @@ class MatrixBuilder(BuilderBase):
             return
         logging.info('Extracting feature group data from database into file '
                      'for matrix %s', matrix_uuid)
-        dataframes = self.write_features_data(
+        dataframes = self.load_features_data(
             as_of_times,
             feature_dictionary,
             entity_date_table_name,
@@ -283,7 +283,7 @@ class MatrixBuilder(BuilderBase):
         logging.info(f"Feature data extracted for matrix {matrix_uuid}")
         logging.info('Extracting label data from database into file for '
                      'matrix %s', matrix_uuid)
-        labels_df = self.write_labels_data(
+        labels_df = self.load_labels_data(
             label_name,
             label_type,
             entity_date_table_name,
@@ -328,7 +328,7 @@ class MatrixBuilder(BuilderBase):
         session.commit()
         session.close()
 
-    def write_labels_data(
+    def load_labels_data(
         self,
         label_name,
         label_type,
@@ -389,7 +389,7 @@ class MatrixBuilder(BuilderBase):
 
         return self.query_to_df(labels_query)
 
-    def write_features_data(
+    def load_features_data(
         self,
         as_of_times,
         feature_dictionary,
@@ -461,7 +461,7 @@ class MatrixBuilder(BuilderBase):
         out = io.StringIO()
         cur.copy_expert(copy_sql, out)
         out.seek(0)
-        df = pandas.read_csv(out)
+        df = pandas.read_csv(out, parse_dates=['as_of_date'])
         df.set_index(['entity_id', 'as_of_date'], inplace=True)
         return df
 
@@ -490,6 +490,8 @@ class MatrixBuilder(BuilderBase):
         """
 
         for i, df in enumerate(dataframes):
+            if df.index.names != ['entity_id', 'as_of_date']:
+                raise ValueError(f'index must be entity_id and as_of_date, value was {df.index}')
             # check for any nulls. the labels, understood to be the first file,
             # can have nulls but no features should. therefore, skip the first dataframe
             if i > 0:
