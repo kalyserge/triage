@@ -120,12 +120,15 @@ class ProjectStorage(object):
     def matrix_storage_engine(self, matrix_storage_class=None, matrix_directory=None):
        return MatrixStorageEngine(self, matrix_storage_class, matrix_directory)
 
+    def model_storage_engine(self, model_directory=None):
+        return ModelStorageEngine(self, model_directory)
+
 
 class ModelStorageEngine(object):
     """Store arbitrary models in a given project storage using joblib"""
-    def __init__(self, project_storage, model_directory='trained_models'):
+    def __init__(self, project_storage, model_directory=None):
         self.project_storage = project_storage
-        self.directories = [model_directory]
+        self.directories = [model_directory or 'trained_models']
 
     def write(self, obj, model_hash):
         with self._get_store(model_hash).open('wb') as fd:

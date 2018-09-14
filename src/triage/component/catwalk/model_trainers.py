@@ -37,14 +37,12 @@ class ModelTrainer(object):
     """
     def __init__(
         self,
-        project_path,
         experiment_hash,
         model_storage_engine,
         db_engine,
         model_grouper=None,
         replace=True
     ):
-        self.project_path = project_path
         self.experiment_hash = experiment_hash
         self.model_storage_engine = model_storage_engine
         self.model_grouper = model_grouper or ModelGrouper()
@@ -78,7 +76,7 @@ class ModelTrainer(object):
         unique = {
             'className': class_path,
             'parameters': self.unique_parameters(parameters),
-            'project_path': self.project_path,
+            'project_path': self.model_storage_engine.project_storage.project_path,
             'training_metadata': matrix_metadata
         }
         logging.info('Creating model hash from unique data %s', unique)

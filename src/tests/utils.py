@@ -11,7 +11,7 @@ import yaml
 from sqlalchemy.orm import sessionmaker
 
 from triage.component import metta
-from triage.component.catwalk.storage import CSVMatrixStore, MatrixStore
+from triage.component.catwalk.storage import CSVMatrixStore, MatrixStore, ProjectStorage, ModelStorageEngine
 from triage.component.results_schema import Model, Matrix
 from triage.experiments import CONFIG_VERSION
 from triage.component.catwalk.storage import TrainMatrixType, TestMatrixType
@@ -51,7 +51,6 @@ class MockTrainedModel(object):
 
 class MockMatrixStore(MatrixStore):
     def __init__(self, matrix_type, matrix_uuid, label_count, db_engine, init_labels=None, metadata_overrides=None, matrix=None):
-        super().__init__()
         base_metadata = {
             'feature_start_time': datetime.date(2014, 1, 1),
             'end_time': datetime.date(2015, 1, 1),
@@ -89,13 +88,10 @@ class MockMatrixStore(MatrixStore):
             return self.init_labels
 
 
-
-def fake_trained_model(project_path, model_storage_engine, db_engine, train_matrix_uuid='efgh'):
+def fake_trained_model(db_engine, train_matrix_uuid='efgh'):
     """Creates and stores a trivial trained model and training matrix
 
     Args:
-        project_path (string) a desired fs/s3 project path
-        model_storage_engine (triage.storage.ModelStorageEngine)
         db_engine (sqlalchemy.engine)
 
     Returns:
@@ -106,7 +102,6 @@ def fake_trained_model(project_path, model_storage_engine, db_engine, train_matr
 
     # Create the fake trained model and store in db
     trained_model = MockTrainedModel()
-    model_storage_engine.write(trained_model, 'abcd')
     db_model = Model(model_hash='abcd', train_matrix_uuid=train_matrix_uuid)
     session.add(db_model)
     session.commit()
@@ -161,18 +156,12 @@ def sample_metta_csv_diff_order(directory):
         df_train=train_matrix,
         test_config=test_metadata,
         df_test=test_matrix,
-        directory=directory,
+        directory=os.path.join(directory, 'matrices'),
         format='csv'
     )
-
-    train_store = CSVMatrixStore(
-        matrix_path=os.path.join(directory, '{}.csv'.format(train_uuid)),
-        metadata_path=os.path.join(directory, '{}.yaml'.format(train_uuid))
-    )
-    test_store = CSVMatrixStore(
-        matrix_path=os.path.join(directory, '{}.csv'.format(test_uuid)),
-        metadata_path=os.path.join(directory, '{}.yaml'.format(test_uuid))
-    )
+    matrix_storage = ProjectStorage(directory).matrix_storage_engine()
+    train_store = matrix_storage.get_store(train_uuid)
+    test_store = matrix_storage.get_store(test_uuid)
     return train_store, test_store
 
 

@@ -5,6 +5,7 @@ import sqlalchemy
 import unittest
 from unittest.mock import patch
 import pytest
+import tempfile
 
 from moto import mock_s3
 from sqlalchemy import create_engine
@@ -12,8 +13,7 @@ from triage.component.catwalk.db import ensure_db
 
 from triage.component.catwalk.model_grouping import ModelGrouper
 from triage.component.catwalk.model_trainers import ModelTrainer
-from triage.component.catwalk.storage import InMemoryModelStorageEngine,\
-    S3ModelStorageEngine, MatrixStore
+from triage.component.catwalk.storage import ProjectStorage
 from .utils import sample_matrix_store, sample_metadata
 from tests.results_tests.factories import init_engine, session, MatrixFactory
 
@@ -42,10 +42,10 @@ def test_model_trainer(sample_matrix_store, grid_config):
             # Creates a matrix entry in the matrices table with uuid from metadata above
             MatrixFactory(matrix_uuid = "1234")
             session.commit()
-            project_path = 'econ-dev/inspections'
-            model_storage_engine = S3ModelStorageEngine(project_path)
+            project_path = 's3://econ-dev/inspections'
+            project_storage = ProjectStorage(project_path)
+            model_storage_engine = project_storage.model_storage_engine()
             trainer = ModelTrainer(
-                project_path=project_path,
                 experiment_hash=None,
                 model_storage_engine=model_storage_engine,
                 model_grouper=ModelGrouper(),
@@ -127,7 +127,6 @@ def test_model_trainer(sample_matrix_store, grid_config):
                 db_engine.execute('select max(batch_run_time) from model_metadata.models')
             ][0]
             trainer = ModelTrainer(
-                project_path=project_path,
                 experiment_hash=None,
                 model_storage_engine=model_storage_engine,
                 model_grouper=ModelGrouper(model_group_keys=['label_name', 'label_timespan']),
@@ -183,17 +182,16 @@ def test_baseline_exception_handling(sample_matrix_store):
     }
     with testing.postgresql.Postgresql() as postgresql:
         db_engine = create_engine(postgresql.url())
-        project_path = 'econ-dev/inspections'
-        model_storage_engine = S3ModelStorageEngine(project_path)
+        project_path = 's3://econ-dev/inspections'
+        project_storage = ProjectStorage(project_path)
         ensure_db(db_engine)
         init_engine(db_engine)
         with mock_s3():
             s3_conn = boto3.resource('s3')
             s3_conn.create_bucket(Bucket='econ-dev')
             trainer = ModelTrainer(
-                project_path='econ-dev/inspections',
                 experiment_hash=None,
-                model_storage_engine = model_storage_engine,
+                model_storage_engine=project_storage.model_storage_engine(),
                 db_engine=db_engine,
                 model_grouper=ModelGrouper()
             )
@@ -227,9 +225,9 @@ def test_custom_groups(sample_matrix_store, grid_config):
             session.commit()
             # create training set
             project_path = 'econ-dev/inspections'
-            model_storage_engine = S3ModelStorageEngine(project_path)
+            project_storage = ProjectStorage(project_path)
+            model_storage_engine = project_storage.model_storage_engine()
             trainer = ModelTrainer(
-                project_path=project_path,
                 experiment_hash=None,
                 model_storage_engine=model_storage_engine,
                 model_grouper=ModelGrouper(['class_path']),
@@ -270,10 +268,11 @@ def test_n_jobs_not_new_model(sample_matrix_store):
         with mock_s3():
             s3_conn = boto3.resource('s3')
             s3_conn.create_bucket(Bucket='econ-dev')
+            project_storage = ProjectStorage('s3://econ-dev')
+            model_storage_engine = project_storage.model_storage_engine()
             trainer = ModelTrainer(
-                project_path='econ-dev/inspections',
                 experiment_hash=None,
-                model_storage_engine=S3ModelStorageEngine('econ-dev/inspections'),
+                model_storage_engine=model_storage_engine,
                 db_engine=db_engine,
                 model_grouper=ModelGrouper()
             )
@@ -314,13 +313,14 @@ class RetryTest(unittest.TestCase):
             db_engine = create_engine(postgresql.url())
             ensure_db(db_engine)
             init_engine(db_engine)
-            trainer = ModelTrainer(
-                project_path='econ-dev/inspections',
-                experiment_hash=None,
-                model_storage_engine=InMemoryModelStorageEngine(project_path=''),
-                db_engine=db_engine,
-                model_grouper=ModelGrouper()
-            )
+            with tempfile.TemporaryDirectory() as tempdir:
+                project_storage = ProjectStorage(tempdir)
+                trainer = ModelTrainer(
+                    experiment_hash=None,
+                    model_storage_engine=project_storage.model_storage_engine(),
+                    db_engine=db_engine,
+                    model_grouper=ModelGrouper()
+                )
 
         # the postgres server goes out of scope here and thus no longer exists
         with patch('time.sleep') as time_mock:
@@ -339,13 +339,14 @@ class RetryTest(unittest.TestCase):
             db_engine = create_engine(postgresql.url())
             ensure_db(db_engine)
             init_engine(db_engine)
-            trainer = ModelTrainer(
-                project_path='econ-dev/inspections',
-                experiment_hash=None,
-                model_storage_engine=InMemoryModelStorageEngine(project_path=''),
-                db_engine=db_engine,
-                model_grouper=ModelGrouper()
-            )
+            with tempfile.TemporaryDirectory() as tempdir:
+                project_storage = ProjectStorage(tempdir)
+                trainer = ModelTrainer(
+                    experiment_hash=None,
+                    model_storage_engine=project_storage.model_storage_engine(),
+                    db_engine=db_engine,
+                    model_grouper=ModelGrouper()
+                )
 
         # start without a database server
         # then bring it back up after the first sleep

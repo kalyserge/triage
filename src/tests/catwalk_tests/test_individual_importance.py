@@ -1,6 +1,5 @@
 from triage.component.catwalk.db import ensure_db
 from triage.component.catwalk.individual_importance import IndividualImportanceCalculator
-from triage.component.catwalk.storage import InMemoryModelStorageEngine
 from tests.utils import fake_trained_model, sample_metta_csv_diff_order
 
 import tempfile
@@ -40,14 +39,11 @@ def test_calculate_and_save():
         project_path = 'econ-dev/inspections'
         with tempfile.TemporaryDirectory() as temp_dir:
             train_store, test_store = sample_metta_csv_diff_order(temp_dir)
-            model_storage_engine = InMemoryModelStorageEngine(project_path)
             calculator = IndividualImportanceCalculator(db_engine, methods=['sample'], replace=False)
             # given a trained model
             # and a test matrix
             _, model_id = \
                 fake_trained_model(
-                    project_path,
-                    model_storage_engine,
                     db_engine,
                     train_matrix_uuid=train_store.uuid
                 )

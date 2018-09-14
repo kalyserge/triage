@@ -3,7 +3,7 @@ from triage.component.catwalk.predictors import Predictor
 from triage.component.catwalk.evaluation import ModelEvaluator
 from triage.component.catwalk.utils import save_experiment_and_get_hash
 from triage.component.catwalk.db import ensure_db
-from triage.component.catwalk.storage import S3ModelStorageEngine, MatrixStore
+from triage.component.catwalk.storage import ProjectStorage, ModelStorageEngine, MatrixStore
 from tests.results_tests.factories import init_engine, session, MatrixFactory
 
 import boto3
@@ -25,7 +25,8 @@ def test_integration():
         with mock_s3():
             s3_conn = boto3.resource('s3')
             s3_conn.create_bucket(Bucket='econ-dev')
-            project_path = 'econ-dev/inspections'
+            project_path = 's3://econ-dev/inspections'
+            project_storage = ProjectStorage(project_path)
 
             # create train and test matrices
             train_matrix = pandas.DataFrame.from_dict({
@@ -48,35 +49,39 @@ def test_integration():
             MatrixFactory(matrix_uuid = "1234")
             session.commit()
 
-            train_store = MatrixStore(matrix=train_matrix, metadata=sample_metadata())
+            matrix_storage = project_storage.matrix_storage_engine()
+            train_store = matrix_storage.get_store('1234')
+            train_store.matrix = train_matrix
+            train_store.metadata = sample_metadata()
+            train_store.save()
 
             as_of_dates = [
                 datetime.date(2016, 12, 21),
                 datetime.date(2017, 1, 21)
             ]
 
-            test_stores = [
-                MatrixStore(
-                    matrix=pandas.DataFrame.from_dict({
-                        'entity_id': [3],
-                        'feature_one': [8],
-                        'feature_two': [5],
-                        'label': [5]
-                    }).set_index(['entity_id']),
-                    metadata={
-                        'label_name': 'label',
-                        'label_timespan': '1y',
-                        'end_time': as_of_date,
-                        'metta-uuid': '1234',
-                        'indices': ['entity_id'],
-                        'matrix_type': 'test',
-                        'as_of_date_frequency': '1month'
-                    }
-                )
-                for as_of_date in as_of_dates
-            ]
+            test_stores = []
+            for as_of_date in as_of_dates:
+                matrix_store = matrix_storage.get_store('1234')
+                matrix_store.matrix = pandas.DataFrame.from_dict({
+                    'entity_id': [3],
+                    'feature_one': [8],
+                    'feature_two': [5],
+                    'label': [5]
+                }).set_index(['entity_id'])
+                matrix_store.metadata = {
+                    'label_name': 'label',
+                    'label_timespan': '1y',
+                    'end_time': as_of_date,
+                    'metta-uuid': '1234',
+                    'indices': ['entity_id'],
+                    'matrix_type': 'test',
+                    'as_of_date_frequency': '1month'
+                }
+                matrix_store.save()
+                test_stores.append(matrix_store)
 
-            model_storage_engine = S3ModelStorageEngine(project_path)
+            model_storage_engine = ModelStorageEngine(project_storage)
 
             experiment_hash = save_experiment_and_get_hash({}, db_engine)
             # instantiate pipeline objects
