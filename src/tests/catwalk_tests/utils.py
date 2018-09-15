@@ -74,7 +74,7 @@ def sample_df():
 def sample_matrix_store():
     with tempfile.TemporaryDirectory() as tempdir:
         project_storage = ProjectStorage(tempdir)
-        store = project_storage.matrix_storage_engine().get_store('test')
+        store = project_storage.matrix_storage_engine().get_store('1234')
         store.matrix = sample_df()
         store.metadata = sample_metadata()
         return store
