@@ -1,8 +1,4 @@
-import boto3
 from contextlib import contextmanager
-import testing.postgresql
-from moto import mock_s3
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import make_transient
 import datetime
@@ -11,12 +7,9 @@ from numpy.testing import assert_array_equal
 import pandas
 
 from triage.component.results_schema import TestPrediction, Matrix, Model
-from triage.component.catwalk.db import ensure_db
 
 from triage.component.catwalk.predictors import Predictor
-from tests.utils import MockTrainedModel
-from triage.component.catwalk.storage import ProjectStorage
-from tests.results_tests.factories import init_engine
+from tests.utils import MockTrainedModel, matrix_creator, matrix_metadata_creator, get_matrix_store, rig_engines
 
 
 AS_OF_DATE = datetime.date(2016, 12, 21)
@@ -24,71 +17,19 @@ AS_OF_DATE = datetime.date(2016, 12, 21)
 
 @contextmanager
 def prepare():
-    with testing.postgresql.Postgresql() as postgresql:
-        db_engine = create_engine(postgresql.url())
-        ensure_db(db_engine)
-        init_engine(db_engine)
+    with rig_engines() as (db_engine, project_storage):
         train_matrix_uuid = '1234'
-        with mock_s3():
-            s3_conn = boto3.resource('s3')
-            s3_conn.create_bucket(Bucket='econ-dev')
-            project_path = 's3://econ-dev/inspections'
-            project_storage = ProjectStorage(project_path)
-            session = sessionmaker(db_engine)()
-            session.add(Matrix(matrix_uuid=train_matrix_uuid))
+        session = sessionmaker(db_engine)()
+        session.add(Matrix(matrix_uuid=train_matrix_uuid))
 
-            # Create the fake trained model and store in db
-            trained_model = MockTrainedModel()
-            model_hash = 'abcd'
-            project_storage.model_storage_engine().write(trained_model, model_hash)
-            db_model = Model(model_hash=model_hash, train_matrix_uuid=train_matrix_uuid)
-            session.add(db_model)
-            session.commit()
-            yield project_storage, db_engine, db_model.model_id
-
-
-def matrix_metadata_creator(**override_kwargs):
-    base_metadata = {
-        'feature_start_time': datetime.date(2012, 12, 20),
-        'end_time': datetime.date(2016, 12, 20),
-        'label_name': 'label',
-        'as_of_date_frequency': '1w',
-        'max_training_history': '5y',
-        'state': 'default',
-        'cohort_name': 'default',
-        'label_timespan': '1y',
-        'metta-uuid': '1234',
-        'matrix_type': 'test',
-        'feature_names': ['ft1', 'ft2'],
-        'feature_groups': ['all: True'],
-        'indices': ['entity_id', 'as_of_date'],
-    }
-    for override_key, override_value in override_kwargs.items():
-        base_metadata[override_key] = override_value
-
-    return base_metadata
-
-
-def matrix_creator(index=None):
-    if not index:
-        index = ['entity_id', 'as_of_date']
-    source_dict = {
-        'entity_id': [1, 2],
-        'feature_one': [3, 4],
-        'feature_two': [5, 6],
-        'label': [7, 8]
-    }
-    if 'as_of_date' in index:
-        source_dict['as_of_date'] = [AS_OF_DATE, AS_OF_DATE]
-    return pandas.DataFrame.from_dict(source_dict).set_index(index)
-
-
-def get_matrix_store(matrix, metadata, project_storage):
-    matrix_store = project_storage.matrix_storage_engine().get_store(metadata['metta-uuid'])
-    matrix_store.matrix = matrix
-    matrix_store.metadata = metadata
-    matrix_store.save()
-    return matrix_store
+        # Create the fake trained model and store in db
+        trained_model = MockTrainedModel()
+        model_hash = 'abcd'
+        project_storage.model_storage_engine().write(trained_model, model_hash)
+        db_model = Model(model_hash=model_hash, train_matrix_uuid=train_matrix_uuid)
+        session.add(db_model)
+        session.commit()
+        yield project_storage, db_engine, db_model.model_id
 
 
 def test_predictor_entity_index():
@@ -100,7 +41,7 @@ def test_predictor_entity_index():
             matrix = matrix_creator(index='entity_id')
             metadata = matrix_metadata_creator(end_time=AS_OF_DATE, matrix_type=mat_type, indices=['entity_id'])
 
-            matrix_store = get_matrix_store(matrix, metadata, project_storage)
+            matrix_store = get_matrix_store(project_storage, matrix, metadata)
             train_matrix_columns = matrix.columns[0:-1].tolist()
 
             predict_proba = predictor.predict(
@@ -139,7 +80,7 @@ def test_predictor_entity_index():
         for mat_type in ("train", "test"):
             new_matrix = matrix_creator(index='entity_id')
             new_metadata = matrix_metadata_creator(end_time=AS_OF_DATE + datetime.timedelta(days=1), matrix_type=mat_type, indices=['entity_id'])
-            new_matrix_store = get_matrix_store(new_matrix, new_metadata, project_storage)
+            new_matrix_store = get_matrix_store(project_storage, new_matrix, new_metadata)
 
             predictor.predict(
                 model_id,
@@ -185,7 +126,7 @@ def test_predictor_composite_index():
 
             matrix = pandas.DataFrame.from_dict(source_dict).set_index(['entity_id', 'as_of_date'])
             metadata = matrix_metadata_creator(matrix_type=mat_type)
-            matrix_store = get_matrix_store(matrix, metadata, project_storage)
+            matrix_store = get_matrix_store(project_storage, matrix, metadata)
 
             predict_proba = predictor.predict(
                 model_id,
@@ -213,9 +154,9 @@ def test_predictor_get_train_columns():
     with prepare() as (project_storage, db_engine, model_id):
         predictor = Predictor(project_storage.model_storage_engine(), db_engine)
         train_store = get_matrix_store(
+            project_storage=project_storage,
             matrix=matrix_creator(),
             metadata=matrix_metadata_creator(matrix_type='train'),
-            project_storage=project_storage
         )
 
         # flip the order of some feature columns in the test matrix
@@ -224,9 +165,9 @@ def test_predictor_get_train_columns():
         order[0], order[1] = order[1], order[0]
         other_order_matrix = other_order_matrix[order]
         test_store = get_matrix_store(
+            project_storage=project_storage,
             matrix=other_order_matrix,
             metadata=matrix_metadata_creator(matrix_type='test'),
-            project_storage=project_storage
         )
 
         # Runs the same test for training and testing predictions
@@ -259,7 +200,7 @@ def test_predictor_retrieve():
         # create prediction set
         matrix = matrix_creator()
         metadata = matrix_metadata_creator()
-        matrix_store = get_matrix_store(matrix, metadata, project_storage)
+        matrix_store = get_matrix_store(project_storage, matrix, metadata)
 
         predict_proba = predictor.predict(
             model_id,
