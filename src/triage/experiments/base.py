@@ -203,7 +203,6 @@ class ExperimentBase(ABC):
         )
 
         self.trainer = ModelTrainer(
-            project_path=self.project_path,
             experiment_hash=self.experiment_hash,
             model_storage_engine=self.model_storage_engine,
             model_grouper=ModelGrouper(self.config.get('model_group_keys', [])),
@@ -214,7 +213,6 @@ class ExperimentBase(ABC):
         self.tester = ModelTester(
             model_storage_engine=self.model_storage_engine,
             matrix_storage_engine=self.matrix_storage_engine,
-            project_path=self.project_path,
             replace=self.replace,
             db_engine=self.db_engine,
             individual_importance_config=self.config.get('individual_importance', {}),

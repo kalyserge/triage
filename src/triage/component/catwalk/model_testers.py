@@ -7,12 +7,11 @@ from triage.component.catwalk.evaluation import ModelEvaluator
 
 
 class ModelTester(object):
-    def __init__(self, db_engine, project_path, model_storage_engine, matrix_storage_engine, replace, evaluator_config, individual_importance_config):
+    def __init__(self, db_engine, model_storage_engine, matrix_storage_engine, replace, evaluator_config, individual_importance_config):
         self.matrix_storage_engine = matrix_storage_engine
         self.predictor = Predictor(
             db_engine=db_engine,
             model_storage_engine=model_storage_engine,
-            project_path=project_path,
             replace=replace
         )
 
