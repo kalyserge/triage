@@ -3,7 +3,8 @@ from unittest import TestCase
 import yaml
 import matplotlib
 matplotlib.use('Agg')
-from triage.component.timechop import Timechop, visualize_chops
+from triage.component.timechop import Timechop
+from triage.component.timechop.plotting import visualize_chops
 
 
 class VisualizeChopTest(TestCase):

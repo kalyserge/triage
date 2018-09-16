@@ -12,7 +12,8 @@ import logging
 from triage.component.architect.feature_generators import FeatureGenerator
 from triage.component.audition import AuditionRunner
 from triage.component.results_schema import upgrade_db, stamp_db, REVISION_MAPPING
-from triage.component.timechop import Timechop, visualize_chops
+from triage.component.timechop import Timechop
+from triage.component.timechop.plotting import visualize_chops
 from triage.experiments import CONFIG_VERSION, MultiCoreExperiment, SingleThreadedExperiment
 from triage.util.db import create_engine
 
