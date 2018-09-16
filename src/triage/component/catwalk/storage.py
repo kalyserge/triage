@@ -351,7 +351,7 @@ class CSVMatrixStore(MatrixStore):
 
     def _load(self):
         with self.matrix_base_store.open('rb') as fd:
-            matrix = pd.read_csv(fd)
+            matrix = pd.read_csv(fd, parse_dates=['as_of_date'])
 
         matrix.set_index(self.metadata['indices'], inplace=True)
 
