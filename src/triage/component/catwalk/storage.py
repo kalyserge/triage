@@ -350,8 +350,9 @@ class CSVMatrixStore(MatrixStore):
         return head_of_matrix
 
     def _load(self):
+        parse_dates_argument = ['as_of_date'] if 'as_of_date' in self.metadata['indices'] else False
         with self.matrix_base_store.open('rb') as fd:
-            matrix = pd.read_csv(fd, parse_dates=['as_of_date'])
+            matrix = pd.read_csv(fd, parse_dates=parse_dates_argument)
 
         matrix.set_index(self.metadata['indices'], inplace=True)
 
