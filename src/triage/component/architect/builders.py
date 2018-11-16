@@ -1,6 +1,8 @@
+import datetime
 import io
 import json
 import logging
+import os
 import pandas
 
 from sqlalchemy.orm import sessionmaker
@@ -467,7 +469,16 @@ class MatrixBuilder(BuilderBase):
         out = io.StringIO()
         cur.copy_expert(copy_sql, out)
         out.seek(0)
-        df = pandas.read_csv(out, parse_dates=["as_of_date"])
+        try:
+            df = pandas.read_csv(out, parse_dates=["as_of_date"])
+        except pandas.errors.ParserError:
+            out.seek(0)
+            fname = f"{datetime.datetime().now().isoformat()}-{str(os.getpid())}"
+            store = self.matrix_storage_engine.project_storage.get_store(['debug_objects'], fname)
+            store.write(out.read())
+            logging.exception("Pandas was unable to load file and failed with following exception. File was written to %s so you may inspect", store)
+            raise
+
         df.set_index(["entity_id", "as_of_date"], inplace=True)
         return downcast_matrix(df)
 
